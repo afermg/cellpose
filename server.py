@@ -14,6 +14,9 @@ import pynng
 import torch
 import trio
 from nahual.serial import deserialize_numpy, serialize_numpy
+from skimage.segmentation import relabel_sequential
+
+from cellpose.models import CellposeModel
 
 PARAMETERS = {}
 
@@ -21,30 +24,31 @@ PARAMETERS = {}
 address = sys.argv[1]
 
 
-def setup(
-    repo_or_dir: str = "facebookresearch/dinov2", model: str = "dinov2_vits14_lc"
-) -> dict:
-    """Set up the repo/dir and configuration, following `torch.hub.load`.
+def setup(**kwargs) -> dict:
+    device = kwargs.pop("device", torch.device(0))
+    gpu = kwargs.pop("gpu", True)
+    model = CellposeModel(
+        **kwargs,
+    )
 
-    Parameters
-    ----------
-    repo_or_dir : str
-        The repository or directory from which to load a model.
-    model : str
-        The name of the pre-trained model to load. Defaults to "general_2d".
+    info = {"device": device, "gpu": gpu, **kwargs}
 
-    Returns
-    -------
-    dict
-        A dictionary containing the device information and configuration parameters.
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    processor = torch.hub.load(repo_or_dir, model).to(device)
+    def processor(*args) -> list[numpy.ndarray]:
+        result = model.eval(
+            **kwargs,
+            z_axis=0,
+            stitch_threshold=0.1,
+            **kwargs,
+        )
+        labels = result[0]
+        ndim = labels.ndim
+        if ndim == 3:  # Cellpose squeezes dims!
+            # TODO Check that this is the best way to project 3-D labels into 2D
+            labels = labels.max(axis=0)
 
-    PARAMETERS["repo_or_dir"] = repo_or_dir
-    PARAMETERS["model"] = model
+            # Cover case where the reduction on z removes an entire item
+            labels = relabel_sequential(labels)[0]
 
-    info = {"device": device, **PARAMETERS}
     return processor, info
 
 
