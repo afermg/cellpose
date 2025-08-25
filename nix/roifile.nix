@@ -26,17 +26,15 @@ buildPythonPackage rec {
     numpy
   ];
 
-  nativeCheckInputs = [
-  ];
-
   pythonImportsCheck = [
     "roifile"
   ];
 
   meta = {
-    description = " Read and write ImageJ ROI format.";
+    description = "Read and write ImageJ ROI format.";
     homepage = "https://github.com/cgohlke/roifile";
     license = lib.licenses.bsd3;
     maintainers = with lib.maintainers; [ afermg ];
+    platforms = lib.platforms.all;
   };
 }

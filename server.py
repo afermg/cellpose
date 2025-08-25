@@ -5,136 +5,64 @@ This is the only reliable messaging pattern in the suite, as it automatically wi
 
 """
 
-import json
 import sys
-import time
+from functools import partial
 
 import numpy
 import pynng
 import torch
 import trio
-from nahual.serial import deserialize_numpy, serialize_numpy
+from nahual.server import responder
 from skimage.segmentation import relabel_sequential
 
 from cellpose.models import CellposeModel
 
-PARAMETERS = {}
-
-# address = "ipc:///tmp/reqrep.ipc"
+# address = "ipc:///tmp/cellpose.ipc"
 address = sys.argv[1]
 
 
 def setup(**kwargs) -> dict:
-    device = kwargs.pop("device", torch.device(0))
-    gpu = kwargs.pop("gpu", True)
-    model = CellposeModel(
-        **kwargs,
+    # Some default values
+    device_id = kwargs.get("device", 0)
+
+    setup_defaults = dict(
+        device=torch.device(device_id),
+        gpu="True",
+    )
+    execution_defaults = dict(
+        return_2d=True,
+        z_axis=0,
+        stitch_threshold=0.1,
     )
 
-    info = {"device": device, "gpu": gpu, **kwargs}
+    setup_kwargs = kwargs.get("setup_kwargs", {})
+    execution_kwargs = kwargs.get("setup_kwargs", {})
 
-    def processor(*args) -> list[numpy.ndarray]:
-        result = model.eval(
-            **kwargs,
-            z_axis=0,
-            stitch_threshold=0.1,
-            **kwargs,
-        )
-        labels = result[0]
-        ndim = labels.ndim
-        if ndim == 3:  # Cellpose squeezes dims!
-            # TODO Check that this is the best way to project 3-D labels into 2D
-            labels = labels.max(axis=0)
+    # Fill kwargs with default
+    for k, v in setup_defaults.items():
+        setup_defaults[k] = setup_kwargs.pop(kwargs, v)
 
-            # Cover case where the reduction on z removes an entire item
-            labels = relabel_sequential(labels)[0]
+    for k, v in execution_defaults.items():
+        execution_defaults[k] = execution_kwargs.pop(kwargs, v)
 
-    return processor, info
+    # Define parameters by combining defaults and non-defaults
+    setup_params = {**setup_defaults, **setup_kwargs}
+    execution_params = {**execution_defaults, **execution_kwargs}
 
+    # Load model instance
+    model = CellposeModel(
+        **setup_defaults,
+    )
 
-async def responder(sock, processor):
-    """Asynchronous responder function for handling model setup and data processing.
+    # Generate a json-encodable dictionary to send back to the client
+    serializable_params = {
+        name: {k: str(v) for k, v in d.items()}
+        for name, d in zip(("setup", "execution"), (setup_params, execution_params))
+    }
 
-        This function continuously listens for incoming messages via a socket. It handles two
-        modes: initializing a model based on received parameters and processing data using
-        an already loaded model.
-
-        Parameters
-        ----------
-            sock: pynng. (object): The socket object used for receiving and sending messages.
-
-        Returns
-        -------
-            None: This function does not return a value but sends responses via the socket.
-
-        Raises
-        ------
-            Exception: If an error occurs during message handling or processing.
-
-
-    Notes:
-        - The function uses JSON for message serialization.
-        - The 'setup' function is called to initialize the model.
-        - The 'process' function is used to compute results from input data.
-    """
-
-    while True:
-        if processor is None:
-            try:
-                msg = await sock.arecv_msg()
-                if len(msg.bytes) == 1:
-                    print("Exiting")
-                    break
-                content = msg.bytes.decode()
-                parameters = json.loads(content)
-                if "model" in parameters:  # Start
-                    print("NODE0: RECEIVED REQUEST")
-                    processor, info = setup(**parameters)
-                    info_str = f"Loaded model with parameters {info}"
-                    print(info_str)
-                    print("Sending model info back")
-                    await sock.asend(json.dumps(info).encode())
-                    print("Model loaded. Will wait for data.")
-
-            except Exception as e:
-                print(f"Waiting for parameters: {e}")
-                time.sleep(1)
-        else:
-            try:
-                # Receive data
-                msg = await sock.arecv_msg()
-                if len(msg.bytes) == 1:
-                    print("Exiting")
-                    break
-                img = deserialize_numpy(msg.bytes)
-                # Add data processing here
-                result = process(img, processor=processor)
-                result_np = result.cpu().detach().numpy()
-                await sock.asend(serialize_numpy(result_np))
-
-            except Exception as e:
-                print(f"Waiting for data: {e}")
-
-
-def process(img: numpy.ndarray, processor) -> dict:
-    """Process an image and masks to generate a graph-based tracking representation.
-
-    Parameters
-    ----------
-    img : array-like
-        The input image data.
-    processor : torch.Model
-        Loaded torch model
-
-    Returns
-    -------
-    dict
-        A dictionary containing the edge table representation of the tracking graph.
-    """
-    torch_tensor = torch.from_numpy(img).float().cuda()
-    result = processor(torch_tensor)
-
-    return result
+    # "Freeze" model in-place
+    processor = partial(process_pixels, model=model, **execution_params)
+    return processor, serializable_params
 
 
 async def main():
@@ -152,11 +80,34 @@ async def main():
     -------
     None
     """
-    processor = None
+
     with pynng.Rep0(listen=address, recv_timeout=300) as sock:
-        print(f"Server listening on {address}")
+        print(f"Cellpose server listening on {address}")
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(responder, sock, processor)
+            responder_curried = partial(responder, setup=setup)
+            nursery.start_soon(responder_curried, sock)
+
+
+def process_pixels(
+    pixels: numpy.ndarray, model: CellposeModel, return_2d: bool = True, **kwargs
+) -> list[numpy.ndarray]:
+    """Load a Cellpose model"""
+    result = model.eval(
+        pixels,
+        **kwargs,
+    )
+    labels = result[0]
+    if return_2d:
+        if labels.ndim == 3:  # Cellpose squeezes dims!
+            labels = labels.max(axis=0)
+
+            # Cover case where the reduction on z removes an entire item
+            labels = relabel_sequential(labels)[0]
+
+            # HACK: Add tile/batch dimension
+            labels = labels[numpy.newaxis]
+
+    return labels
 
 
 if __name__ == "__main__":

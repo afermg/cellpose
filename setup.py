@@ -11,10 +11,10 @@ install_deps = [
     "torchvision",
     "opencv-python-headless",
     "fastremap",
-    # "imagecodecs",
-    # "roifile",
-    # "fill-voids",
-    # "segment_anything",
+    "imagecodecs",
+    "roifile",
+    "fill-voids",
+    "segment_anything",
 ]
 
 image_deps = ["nd2", "pynrrd"]

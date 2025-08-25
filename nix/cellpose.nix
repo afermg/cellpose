@@ -17,6 +17,10 @@
   imagecodecs,
   tifffile,
   scikit-image,
+  fill-voids,
+  roifile,
+  segment-anything,
+
 }:
 buildPythonPackage {
   pname = "cellpose";
@@ -48,6 +52,9 @@ buildPythonPackage {
     natsort
     tifffile
     scikit-image
+    fill-voids
+    roifile
+    segment-anything
   ];
 
   pythonImportsCheck = [

@@ -37,7 +37,7 @@ buildPythonPackage rec {
   meta = {
     description = "";
     homepage = "";
-    # license = lib.licenses.bsd3;
+    license = lib.licenses.bsd3;
     maintainers = with lib.maintainers; [ afermg ];
   };
 }

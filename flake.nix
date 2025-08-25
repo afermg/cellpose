@@ -1,6 +1,7 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    # nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs_master.url = "github:NixOS/nixpkgs/master";
     systems.url = "github:nix-systems/default";
     flake-utils.url = "github:numtide/flake-utils";
@@ -30,30 +31,14 @@
       with pkgs;
       rec {
         formatter = pkgs.alejandra;
-        apps.default = {
-          type = "app";
-          program =
-            writeShellApplication {
-              name = "app";
-              text = ''
-                python server.py "$1"
-              '';
-            }
-            + "/bin/app";
-        };
         packages = pkgs.callPackage ./nix { };
         devShells = {
           default =
             let
               python_with_pkgs = (
-                python312.withPackages (pp: [
+                python3.withPackages (pp: [
                   (inputs.nahual-flake.packages.${system}.nahual)
                   packages.cellpose
-                  # packages.fastremap
-                  packages.fill-voids
-                  packages.roifile
-                  # packages.imagecodecs
-                  packages.segment-anything
                 ])
               );
             in
