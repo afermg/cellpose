@@ -7,11 +7,13 @@ This is the only reliable messaging pattern in the suite, as it automatically wi
 
 import sys
 from functools import partial
+from typing import Callable
 
 import numpy
 import pynng
 import torch
 import trio
+from loguru import logger
 from nahual.server import responder
 from skimage.segmentation import relabel_sequential
 
@@ -19,6 +21,9 @@ from cellpose.models import CellposeModel
 
 # address = "ipc:///tmp/cellpose.ipc"
 address = sys.argv[1]
+
+
+logger.add(address.split("/")[-1])
 
 
 def setup(**kwargs) -> dict:
@@ -49,10 +54,9 @@ def setup(**kwargs) -> dict:
     setup_params = {**setup_defaults, **setup_kwargs}
     execution_params = {**execution_defaults, **execution_kwargs}
 
+    load_model = partial(CellposeModel, **setup_defaults)
     # Load model instance
-    model = CellposeModel(
-        **setup_defaults,
-    )
+    model = load_model()
 
     # Generate a json-encodable dictionary to send back to the client
     serializable_params = {
@@ -61,8 +65,34 @@ def setup(**kwargs) -> dict:
     }
 
     # "Freeze" model in-place
-    processor = partial(process_pixels, model=model, **execution_params)
+    processor = partial(
+        process_or_reload, model=model, loader=load_model, **execution_params
+    )
     return processor, serializable_params
+
+
+def process_or_reload(
+    pixels: numpy.ndarray,
+    model: CellposeModel,
+    loader: Callable,
+    **execution_params,
+):
+    """
+    Using multiple GPUs in Cellpose leads to some instabilities.
+    If it happens just reload the current model and retry.
+    If this is failing over and over this will be visible
+    """
+    fails = True
+    while fails:
+        try:
+            result = process_pixels(pixels, model, **execution_params)
+            fails = False
+        except Exception as e:
+            logger.debug(e)
+            logger.info("Reloading model")
+            del model  # Let us be explicit
+            model = loader()  # Setup parameters are curried
+    return result
 
 
 async def main():
@@ -96,6 +126,9 @@ def process_pixels(
         pixels,
         **kwargs,
     )
+
+    # torch.cuda.empty_cache()  # Avoid invalid memory access errors
+
     labels = result[0]
     if return_2d:
         if labels.ndim == 3:  # Cellpose squeezes dims!

@@ -20,7 +20,7 @@
   fill-voids,
   roifile,
   segment-anything,
-
+  loguru,
 }:
 buildPythonPackage {
   pname = "cellpose";
@@ -55,6 +55,7 @@ buildPythonPackage {
     fill-voids
     roifile
     segment-anything
+    loguru
   ];
 
   pythonImportsCheck = [
