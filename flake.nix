@@ -30,6 +30,22 @@
       in
       with pkgs;
       rec {
+        apps.default =
+          let
+            python_with_pkgs = python3.withPackages (pp: [
+              (inputs.nahual-flake.packages.${system}.nahual)
+              packages.cellpose
+            ]);
+            runServer = pkgs.writeScriptBin "runserver.sh" ''
+              #!${pkgs.bash}/bin/bash
+              ${python_with_pkgs}/bin/python ${self}/server.py ''${@:-"ipc:///tmp/cellpose.ipc"}
+            '';
+          in
+          {
+            type = "app";
+            program = "${runServer}/bin/runserver.sh";
+          };
+        
         formatter = pkgs.alejandra;
         packages = pkgs.callPackage ./nix { };
         devShells = {
