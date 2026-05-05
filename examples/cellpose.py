@@ -1,8 +1,10 @@
 # /usr/bin/env python
 """
-This example uses a server within the environment defined on `https://github.com/afermg/dinov2.git`.
+This example uses a server within the environment defined on `https://github.com/afermg/cellpose.git` (default branch: `nahual`).
 
-Run `nix run github:afermg/cellpose/2146b5ee3b2c7eb2c826efe7a24b3b289432500b -- ipc:///tmp/cellpose.ipc"` from the root directory of that repository.
+Run `nix run github:afermg/cellpose -- ipc:///tmp/cellpose.ipc` from any directory,
+or `nix develop --command bash -c "python server.py ipc:///tmp/cellpose.ipc"` from
+the root of a local checkout.
 """
 
 import numpy
