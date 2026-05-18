@@ -80,7 +80,12 @@ def process_or_reload(
     """
     Using multiple GPUs in Cellpose leads to some instabilities.
     If it happens just reload the current model and retry.
-    If this is failing over and over this will be visible
+
+    A CUDA device-side assert poisons the whole process's CUDA context;
+    in that case the recovery ``loader()`` call also raises. Exit so the
+    orchestrator can restart us with a fresh context instead of looping
+    forever (the previous behaviour resulted in every subsequent request
+    returning an empty error envelope to the client).
     """
     fails = True
     while fails:
@@ -91,7 +96,14 @@ def process_or_reload(
             logger.debug(e)
             logger.info("Reloading model")
             del model  # Let us be explicit
-            model = loader()  # Setup parameters are curried
+            try:
+                model = loader()  # Setup parameters are curried
+            except Exception as reload_err:
+                logger.error(
+                    f"Unrecoverable CUDA failure ({reload_err}); exiting "
+                    "so the orchestrator can restart the server."
+                )
+                sys.exit(1)
     return result
 
 
