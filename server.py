@@ -28,11 +28,25 @@ logger.add(address.split("/")[-1])
 
 def setup(**kwargs) -> dict:
     # Some default values
-    device_id = kwargs.get("device", 0)
+    device_id = kwargs.get("device")
+    if device_id is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device_id, int):
+        device = (
+            torch.device(device_id)
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+    else:
+        device = torch.device(device_id)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                f"CUDA device requested but CUDA is unavailable: {device_id}"
+            )
 
     setup_defaults = dict(
-        device=torch.device(device_id),
-        gpu="True",
+        device=device,
+        gpu=device.type == "cuda",
     )
     execution_defaults = dict(
         return_2d=True,
@@ -40,15 +54,15 @@ def setup(**kwargs) -> dict:
         stitch_threshold=0.1,
     )
 
-    setup_kwargs = kwargs.get("setup_kwargs", {})
-    execution_kwargs = kwargs.get("setup_kwargs", {})
+    setup_kwargs = kwargs.get("setup_kwargs", {}).copy()
+    execution_kwargs = kwargs.get("execution_kwargs", {}).copy()
 
-    # Fill kwargs with default
-    for k, v in setup_defaults.items():
-        setup_defaults[k] = setup_kwargs.pop(kwargs, v)
+    # Fill kwargs with defaults.
+    for key, value in setup_defaults.items():
+        setup_defaults[key] = setup_kwargs.pop(key, value)
 
-    for k, v in execution_defaults.items():
-        execution_defaults[k] = execution_kwargs.pop(kwargs, v)
+    for key, value in execution_defaults.items():
+        execution_defaults[key] = execution_kwargs.pop(key, value)
 
     # Define parameters by combining defaults and non-defaults
     setup_params = {**setup_defaults, **setup_kwargs}

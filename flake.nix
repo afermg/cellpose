@@ -10,17 +10,15 @@
     nahual-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-      systems,
-      ...
-    }@inputs:
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+    systems,
+    ...
+  } @ inputs:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = import nixpkgs {
           system = system;
           config = {
@@ -28,30 +26,39 @@
             cudaSupport = true;
           };
         };
+        modelPackages = pkgs.callPackage ./nix {};
+        python_with_pkgs = pkgs.python3.withPackages (pp: [
+          (inputs.nahual-flake.packages.${system}.nahual)
+          modelPackages.cellpose
+        ]);
+        runServer = pkgs.writeScriptBin "nahual-cellpose" ''
+          #!${pkgs.bash}/bin/bash
+          exec ${python_with_pkgs}/bin/python ${self}/server.py "''${1:-tcp://0.0.0.0:5555}"
+        '';
+        serverApp = {
+          type = "app";
+          program = "${runServer}/bin/nahual-cellpose";
+        };
       in
-      with pkgs;
-      rec {
-        apps.default =
-          let
-            python_with_pkgs = python3.withPackages (pp: [
-              (inputs.nahual-flake.packages.${system}.nahual)
-              packages.cellpose
-            ]);
-            runServer = pkgs.writeScriptBin "runserver.sh" ''
-              #!${pkgs.bash}/bin/bash
-              ${python_with_pkgs}/bin/python ${self}/server.py ''${@:-"ipc:///tmp/cellpose.ipc"}
-            '';
-          in
-          {
-            type = "app";
-            program = "${runServer}/bin/runserver.sh";
-          };
-        
-        formatter = pkgs.alejandra;
-        packages = pkgs.callPackage ./nix { };
-        devShells = {
-          default =
-            let
+        with pkgs; rec {
+          apps.default = serverApp;
+          formatter = pkgs.alejandra;
+          packages =
+            modelPackages
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              oci-image = import ./nix/oci-image.nix {
+                inherit pkgs;
+                name = "cellpose";
+                title = "Nahual Cellpose";
+                description = "Cellpose segmentation served through Nahual";
+                source = "https://github.com/afermg/cellpose";
+                revision = self.rev or self.dirtyRev or "unknown";
+                server = runServer;
+                entrypoint = serverApp.program;
+              };
+            };
+          devShells = {
+            default = let
               python_with_pkgs = (
                 python3.withPackages (pp: [
                   (inputs.nahual-flake.packages.${system}.nahual)
@@ -59,34 +66,34 @@
                 ])
               );
             in
-            mkShell {
-              packages = [
-                python_with_pkgs
-              ];
-              currentSystem = system;
-              venvDir = "./.venv";
-              postVenvCreation = ''
-                unset SOURCE_DATE_EPOCH
-              '';
-              postShellHook = ''
-                unset SOURCE_DATE_EPOCH
-              '';
-              shellHook = ''
-                export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
-                export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
-                export NVCC_APPEND_FLAGS="-Xcompiler -fno-PIC"
-                export TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6"
-                export CUDA_NVCC_FLAGS="-O2 -Xcompiler -fno-PIC"
-                runHook venvShellHook
-                # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
-                # the script's directory (or cwd for python -c mode) to
-                # sys.path, which would otherwise let the in-tree cellpose/
-                # source dir shadow the nix-built package.
-                export PYTHONSAFEPATH=1
-                export PYTHONDONTWRITEBYTECODE=1
-              '';
-            };
-        };
-      }
+              mkShell {
+                packages = [
+                  python_with_pkgs
+                ];
+                currentSystem = system;
+                venvDir = "./.venv";
+                postVenvCreation = ''
+                  unset SOURCE_DATE_EPOCH
+                '';
+                postShellHook = ''
+                  unset SOURCE_DATE_EPOCH
+                '';
+                shellHook = ''
+                  export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
+                  export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
+                  export NVCC_APPEND_FLAGS="-Xcompiler -fno-PIC"
+                  export TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6"
+                  export CUDA_NVCC_FLAGS="-O2 -Xcompiler -fno-PIC"
+                  runHook venvShellHook
+                  # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
+                  # the script's directory (or cwd for python -c mode) to
+                  # sys.path, which would otherwise let the in-tree cellpose/
+                  # source dir shadow the nix-built package.
+                  export PYTHONSAFEPATH=1
+                  export PYTHONDONTWRITEBYTECODE=1
+                '';
+              };
+          };
+        }
     );
 }
